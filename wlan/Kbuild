@@ -4,7 +4,8 @@
 # tree is the SoC-behaviour reference when the two disagree.
 #
 # Bring-up configuration:
-#  - P2P/AP compiled out (CFG_ENABLE_WIFI_DIRECT=0, see include/config.h)
+#  - P2P/AP built in (CFG_ENABLE_WIFI_DIRECT=1): /dev/wmtWifi "A" brings up
+#    ap0, "P"/"S" brings up p2p0, both on a second wiphy
 #  - PIO mode only: CONF_MTK_AHB_DMA=0 in os/linux/hif/ahb/include/hif.h;
 #    the MT6572 DMA glue (AP_DMA GDMA2) is a later optimization
 
@@ -12,7 +13,7 @@ ccflags-y += -DLINUX -DMT6628
 ccflags-y += -D_HIF_SDIO=1
 ccflags-y += -DDBG=0
 
-ccflags-y += -DCFG_ENABLE_WIFI_DIRECT=0
+ccflags-y += -DCFG_ENABLE_WIFI_DIRECT=1
 ccflags-y += -DCFG_SUPPORT_AGPS_ASSIST=0
 ccflags-y += -DCFG_SUPPORT_TSF_USING_BOOTTIME=1
 ccflags-y += -DCFG_P2P_LEGACY_COEX_REVISE=1
@@ -40,6 +41,7 @@ wlan_gen2-objs := \
 	common/wlan_oid.o \
 	common/wlan_bow.o \
 	common/debug.o \
+	common/wlan_p2p.o \
 	nic/nic.o \
 	nic/nic_tx.o \
 	nic/nic_rx.o \
@@ -47,6 +49,7 @@ wlan_gen2-objs := \
 	nic/cmd_buf.o \
 	nic/que_mgt.o \
 	nic/nic_cmd_event.o \
+	nic/p2p_nic.o \
 	os/linux/gl_init.o \
 	os/linux/gl_kal.o \
 	os/linux/gl_bow.o \
@@ -57,6 +60,10 @@ wlan_gen2-objs := \
 	os/linux/gl_vendor.o \
 	os/linux/platform.o \
 	os/linux/gl_proc.o \
+	os/linux/gl_p2p.o \
+	os/linux/gl_p2p_cfg80211.o \
+	os/linux/gl_p2p_init.o \
+	os/linux/gl_p2p_kal.o \
 	mgmt/ais_fsm.o \
 	mgmt/aaa_fsm.o \
 	mgmt/assoc.o \
@@ -84,5 +91,14 @@ wlan_gen2-objs := \
 	mgmt/tdls.o \
 	mgmt/tdls_com.o \
 	mgmt/stats.o \
+	mgmt/p2p_assoc.o \
+	mgmt/p2p_bss.o \
+	mgmt/p2p_fsm.o \
+	mgmt/p2p_func.o \
+	mgmt/p2p_ie.o \
+	mgmt/p2p_rlm.o \
+	mgmt/p2p_rlm_obss.o \
+	mgmt/p2p_scan.o \
+	mgmt/p2p_state.o \
 	os/linux/hif/ahb/arm.o \
 	os/linux/hif/ahb/ahb.o

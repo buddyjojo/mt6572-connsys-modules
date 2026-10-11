@@ -21,7 +21,8 @@ out-of-tree modules in the spirit of
 | Power management (PSM / chip sleep) | working — sleeps on an idle link with BT and Wi-Fi up (see [PSM](#power-management-psm)) |
 | WiFi (`wlan/` gen2 driver → cfg80211 `wlan0`) | working — scan, WPA2-PSK association, DHCP, station stats, ~34/22 Mbit/s TCP down/up |
 | BT + WiFi together | working with Wi-Fi in CAM, the default — HID keyboard + mouse alongside Wi-Fi traffic; with 802.11 power save on, BT HID traffic makes the BT firmware assert, and a BLE mouse can still drop now and then (see [Operational notes](#operational-notes)) |
-| WiFi AP / P2P (Wi-Fi Direct) | not started — hardware and firmware support it, driver sources are in git history (see [AP / P2P](#ap--p2p)) |
+| WiFi AP (hotspot) | working — `ap0` next to an associated `wlan0` on the same channel, WPA2-PSK through wpa_supplicant `mode=2`, ~22-24 Mbit/s TCP both ways; phones in power save see idle traffic late or lost (see [AP / P2P](#ap--p2p)) |
+| WiFi P2P (Wi-Fi Direct) | built, not yet tested (`p2p0`) |
 | FM receiver (`fmradio/` MT6627 driver → `/dev/fm`) | working — tune, scan/seek, RDS (PI, station name, radio text), audio to the headphones through the AFE's CONSYS I2S input, recording and streaming through the AFE's capture device; the headphone cable is the antenna |
 | GPS (`conn_soc/` → `/dev/stpgps`) | working — first fix in about 50 s from an empty aiding store, about 10 s warm, with the device's own stock positioning engine; holds the chip awake while open, alongside BT; `tools/gps-up.sh` serves it through gpsd (see [GPS](#gps)) |
 
@@ -326,40 +327,62 @@ How to run and build each one, and the rules they share, are in
 
 ## AP / P2P
 
-Not built today, but nothing in the hardware or firmware stands in the way -
-this is a porting job, not a capability question.
+The driver's AP and Wi-Fi Direct stack is one piece: the `p2p_*` FSM under
+`wlan/mgmt/`, `wlan/nic/p2p_nic.c`, `wlan/common/wlan_p2p.c` and the Linux
+glue `wlan/os/linux/gl_p2p*.c`, built with `CFG_ENABLE_WIFI_DIRECT=1`. It
+registers a second wiphy at module load (interface modes AP, P2P-GO,
+P2P-client, managed). The interface itself comes from `/dev/wmtWifi`, not
+from `iw ... interface add`:
 
-What already exists:
+| Command | Result |
+|---|---|
+| `echo A > /dev/wmtWifi` | `ap0` (AP) on the second wiphy |
+| `echo P > /dev/wmtWifi` | `p2p0` (Wi-Fi Direct) |
+| `echo 0 > /dev/wmtWifi` | removes `ap0`/`p2p0` and turns Wi-Fi off |
 
-- The MAC/baseband is the same CONSYS core the stock MT6582-class driver
-  drives, and the RAM firmware we load (`WIFI_RAM_CODE_MT6582`) is the stock
-  image, so the firmware-side AP and P2P command interfaces are already
-  there. Stock Android on this board advertised `android.hardware.wifi.direct`
-  and shipped a p2p_supplicant configuration, so the combination shipped on
-  this exact hardware.
-- The driver's own P2P/AP stack exists in this repository's history. It is
-  compiled out (`-DCFG_ENABLE_WIFI_DIRECT=0` in `wlan/Kbuild`), and the
-  sources were deleted as never-compiled dead code in `6b5107f` - 40 files,
-  27k lines, 15 of them `.c`: the `p2p_*` FSM/assoc/scan/IE/RLM set under
-  `wlan/mgmt/`, `wlan/nic/p2p_nic.c`, `wlan/common/wlan_p2p.c`, and the
-  Linux glue `gl_p2p{,_cfg80211,_init,_kal}.c`. Recover any of them with
-  `git show 6b5107f^:wlan/mgmt/p2p_fsm.c`.
+`wlan0` stays up and associated while `ap0` runs. There is one radio, so
+the AP has to use the station's channel.
 
-What it would take:
+Plain AP with wpa_supplicant (hostapd works too), `ap.conf`:
 
-1. Restore those sources and add them back to `wlan/Kbuild`.
-2. Build with `CFG_ENABLE_WIFI_DIRECT=1` (and
-   `CFG_ENABLE_WIFI_DIRECT_CFG_80211` for the cfg80211 path).
-3. Register the second (P2P) net device and its cfg80211 ops alongside
-   `wlan0`.
-4. Userspace: wpa_supplicant built with AP/P2P support - the rootfs here
-   currently builds it without (`BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT` is
-   unset) - or hostapd for plain AP.
+```
+ctrl_interface=/var/run/wpa_supplicant_ap
+network={
+	ssid="my-ap"
+	mode=2
+	frequency=2437
+	key_mgmt=WPA-PSK
+	proto=RSN
+	pairwise=CCMP
+	group=CCMP
+	psk="change-me"
+}
+```
 
-The real work is step 2-3: `gl_p2p_cfg80211.c` targets the vendor's
-cfg80211 vintage, so it needs the same adaptation to current kernel APIs
-that the station path already went through. Treat the recovered files as a
-reference implementation rather than something that will compile as-is.
+Set `frequency` to `wlan0`'s if it is associated. Then:
+
+```
+echo A > /dev/wmtWifi
+ip addr add 192.168.43.1/24 dev ap0
+wpa_supplicant -B -i ap0 -D nl80211 -c ap.conf
+dnsmasq --interface=ap0 --bind-interfaces --port=0 \
+	--dhcp-range=192.168.43.10,192.168.43.50,12h
+```
+
+Association, authentication and the station table live in the driver and
+firmware (`WIPHY_FLAG_HAVE_AP_SME`); wpa_supplicant learns about clients
+from `NEW_STATION` events and runs the 4-way handshake. Expected and
+harmless in its log: the driver has no `change_station` ("Could not set
+station ... flags"), no `set_txq_params`, and no GTK sequence readback.
+
+Known limits:
+
+- Clients in 802.11 power save (phones) see idle traffic arrive up to ~1 s
+  late and lose a few percent of it; bulk traffic is unaffected. The same
+  phone behind a regular AP sees neither.
+- Sharing the station uplink needs NAT (netfilter) in the kernel.
+- The vendor's P2P wireless-extensions ioctl interface is gone: current
+  kernels never call `ndo_do_ioctl` for it, and nl80211 replaces it.
 
 ## Operational notes
 
