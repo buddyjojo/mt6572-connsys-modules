@@ -22,7 +22,7 @@ out-of-tree modules in the spirit of
 | WiFi (`wlan/` gen2 driver → cfg80211 `wlan0`) | working — scan, WPA2-PSK association, DHCP, station stats, ~34/22 Mbit/s TCP down/up |
 | BT + WiFi together | working with Wi-Fi in CAM, the default — HID keyboard + mouse alongside Wi-Fi traffic; with 802.11 power save on, BT HID traffic makes the BT firmware assert, and a BLE mouse can still drop now and then (see [Operational notes](#operational-notes)) |
 | WiFi AP (hotspot) | working — `ap0` next to an associated `wlan0` on the same channel, WPA2-PSK through wpa_supplicant `mode=2`, ~22-24 Mbit/s TCP both ways; phones in power save see idle traffic late or lost (see [AP / P2P](#ap--p2p)) |
-| WiFi P2P (Wi-Fi Direct) | built, not yet tested (`p2p0`) |
+| WiFi P2P (Wi-Fi Direct) | working — `p2p0` next to an associated `wlan0`: discovery, provision discovery, GO negotiation, WPS PBC, as group owner or client, ~19-28 Mbit/s TCP both ways (see [AP / P2P](#ap--p2p)) |
 | FM receiver (`fmradio/` MT6627 driver → `/dev/fm`) | working — tune, scan/seek, RDS (PI, station name, radio text), audio to the headphones through the AFE's CONSYS I2S input, recording and streaming through the AFE's capture device; the headphone cable is the antenna |
 | GPS (`conn_soc/` → `/dev/stpgps`) | working — first fix in about 50 s from an empty aiding store, about 10 s warm, with the device's own stock positioning engine; holds the chip awake while open, alongside BT; `tools/gps-up.sh` serves it through gpsd (see [GPS](#gps)) |
 
@@ -369,6 +369,29 @@ dnsmasq --interface=ap0 --bind-interfaces --port=0 \
 	--dhcp-range=192.168.43.10,192.168.43.50,12h
 ```
 
+Wi-Fi Direct with wpa_supplicant on `p2p0` (`p2p.conf`):
+
+```
+ctrl_interface=/var/run/wpa_supplicant_p2p
+device_name=my-device
+device_type=1-0050F204-1
+config_methods=push_button virtual_push_button keypad display
+p2p_no_group_iface=1
+```
+
+`p2p_no_group_iface=1` is required: the driver cannot add interfaces, so
+the group runs on `p2p0` itself. Then:
+
+```
+echo P > /dev/wmtWifi
+wpa_supplicant -B -i p2p0 -D nl80211 -c p2p.conf
+wpa_cli -p /var/run/wpa_supplicant_p2p -i p2p0 p2p_find
+wpa_cli -p /var/run/wpa_supplicant_p2p -i p2p0 p2p_connect <peer> pbc
+```
+
+As group owner, serve DHCP on `p2p0` (`192.168.49.1/24` is the Android
+convention); as client, run a DHCP client on it.
+
 Association, authentication and the station table live in the driver and
 firmware (`WIPHY_FLAG_HAVE_AP_SME`); wpa_supplicant learns about clients
 from `NEW_STATION` events and runs the 4-way handshake. Expected and
@@ -381,6 +404,10 @@ Known limits:
   late and lose a few percent of it; bulk traffic is unaffected. The same
   phone behind a regular AP sees neither.
 - Sharing the station uplink needs NAT (netfilter) in the kernel.
+- The firmware tags public action frames addressed to the P2P Device
+  address as AIS traffic; the driver routes them to P2P by destination
+  address (`nicRxProcessActionFrame`), otherwise provision discovery and
+  GO negotiation from a peer never reach wpa_supplicant.
 - The vendor's P2P wireless-extensions ioctl interface is gone: current
   kernels never call `ndo_do_ioctl` for it, and nl80211 replaces it.
 
