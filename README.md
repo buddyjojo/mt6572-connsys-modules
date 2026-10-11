@@ -21,7 +21,7 @@ out-of-tree modules in the spirit of
 | Power management (PSM / chip sleep) | working — sleeps on an idle link with BT and Wi-Fi up (see [PSM](#power-management-psm)) |
 | WiFi (`wlan/` gen2 driver → cfg80211 `wlan0`) | working — scan, WPA2-PSK association, DHCP, station stats, ~34/22 Mbit/s TCP down/up |
 | BT + WiFi together | working with Wi-Fi in CAM, the default — HID keyboard + mouse alongside Wi-Fi traffic; with 802.11 power save on, BT HID traffic makes the BT firmware assert, and a BLE mouse can still drop now and then (see [Operational notes](#operational-notes)) |
-| WiFi AP (hotspot) | working — `ap0` next to an associated `wlan0` on the same channel, WPA2-PSK through wpa_supplicant `mode=2`, ~22-24 Mbit/s TCP both ways, ~11/7 Mbit/s down/up to a client sharing `wlan0`'s uplink through NAT; phones in power save see idle traffic late or lost (see [AP / P2P](#ap--p2p)) |
+| WiFi AP (hotspot) | working — `ap0` next to an associated `wlan0` on the same channel, WPA2-PSK through wpa_supplicant `mode=2`, ~22-24 Mbit/s TCP both ways, ~11/7 Mbit/s down/up to a client sharing `wlan0`'s uplink through NAT; with Bluetooth's background LE scan at its default, clients lose a few percent of small uplink frames (see [AP / P2P](#ap--p2p)) |
 | WiFi P2P (Wi-Fi Direct) | working — `p2p0` next to an associated `wlan0`: discovery, provision discovery, GO negotiation, WPS PBC, persistent groups re-invoked from either side, service discovery both ways, as group owner or client, ~19-28 Mbit/s TCP both ways (see [AP / P2P](#ap--p2p)) |
 | FM receiver (`fmradio/` MT6627 driver → `/dev/fm`) | working — tune, scan/seek, RDS (PI, station name, radio text), audio to the headphones through the AFE's CONSYS I2S input, recording and streaming through the AFE's capture device; the headphone cable is the antenna |
 | GPS (`conn_soc/` → `/dev/stpgps`) | working — first fix in about 50 s from an empty aiding store, about 10 s warm, with the device's own stock positioning engine; holds the chip awake while open, alongside BT; `tools/gps-up.sh` serves it through gpsd (see [GPS](#gps)) |
@@ -405,9 +405,14 @@ station ... flags"), no `set_txq_params`, and no GTK sequence readback.
 
 Known limits:
 
-- Clients in 802.11 power save (phones) see idle traffic arrive up to ~1 s
-  late and lose a few percent of it; bulk traffic is unaffected. The same
-  phone behind a regular AP sees neither.
+- Bluetooth shares the antenna (`coex_wmt_ant_mode=1`). While a paired BLE
+  device is set to reconnect, BlueZ scans in the background for 30 ms out
+  of every 60 ms, and AP clients lose a few percent of their small uplink
+  frames: 1-5 % of pings to a sleeping phone, against none with BT off.
+  Under `[LE]` in `/etc/bluetooth/main.conf`, `ScanIntervalAutoConnect=0x0800`
+  and `ScanWindowAutoConnect=0x0030` (30 ms every 1.28 s) remove the loss,
+  at the cost of up to ~1.3 s more for a BLE device to reconnect.
+- Phones in power save answer idle traffic up to ~2 s late, behind any AP.
 - Traffic through the shared uplink crosses the one channel twice
   (client to `ap0`, then `wlan0` to its AP), so a client gets about half
   the AP's direct throughput: ~11/7 Mbit/s down/up, with the CPU mostly
