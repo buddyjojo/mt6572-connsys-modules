@@ -106,6 +106,31 @@ VOID register_set_p2p_mode_handler(set_p2p_mode handler)
 }
 EXPORT_SYMBOL(register_set_p2p_mode_handler);
 
+/* remove ap0/p2p0; the station interface stays */
+static INT32 wifi_p2p_off(VOID)
+{
+	struct net_device *netdev;
+	PARAM_CUSTOM_P2P_SET_STRUCT_T p2pmode = { .u4Enable = 0, .u4Mode = 0 };
+	INT32 ret;
+
+	if (pf_set_p2p_mode == NULL)
+		return -1;
+
+	netdev = dev_get_by_name(&init_net, ifname);
+	if (netdev == NULL) {
+		WIFI_ERR_FUNC("Fail to get %s net device\n", ifname);
+		return -1;
+	}
+
+	ret = pf_set_p2p_mode(netdev, p2pmode);
+	if (ret != 0)
+		WIFI_ERR_FUNC("Turn off p2p/ap mode fail");
+	else
+		WIFI_INFO_FUNC("Turn off p2p/ap mode");
+	dev_put(netdev);
+	return ret;
+}
+
 /* For dynamical debug level setting */
 /* copy of debug.h in wlan driver */
 #define DBG_CLASS_ERROR         BIT(0)
@@ -195,31 +220,11 @@ do { \
 /*-----------------------------------------------------------------*/
 INT32 wifi_reset_start(VOID)
 {
-	struct net_device *netdev = NULL;
-	PARAM_CUSTOM_P2P_SET_STRUCT_T p2pmode;
-
 	down(&wr_mtx);
 
-	if (powered == 1) {
-		netdev = dev_get_by_name(&init_net, ifname);
-		if (netdev == NULL) {
-			WIFI_ERR_FUNC("Fail to get %s net device\n", ifname);
-		} else {
-			p2pmode.u4Enable = 0;
-			p2pmode.u4Mode = 0;
-
-			if (pf_set_p2p_mode) {
-				if (pf_set_p2p_mode(netdev, p2pmode) != 0)
-					WIFI_ERR_FUNC("Turn off p2p/ap mode fail");
-				else
-					WIFI_INFO_FUNC("Turn off p2p/ap mode");
-			}
-			dev_put(netdev);
-			netdev = NULL;
-		}
-	} else {
-		/* WIFI is off before whole chip reset, do nothing */
-	}
+	/* WIFI off before whole chip reset: nothing to do */
+	if (powered == 1)
+		wifi_p2p_off();
 
 	return 0;
 }
@@ -344,24 +349,8 @@ ssize_t WIFI_write(struct file *filp, const char __user *buf, size_t count, loff
 				goto done;
 			}
 
-			netdev = dev_get_by_name(&init_net, ifname);
-			if (netdev == NULL) {
-				WIFI_ERR_FUNC("Fail to get %s net device\n", ifname);
-			} else {
-				p2pmode.u4Enable = 0;
-				p2pmode.u4Mode = 0;
-
-				if (pf_set_p2p_mode) {
-					if (pf_set_p2p_mode(netdev, p2pmode) != 0) {
-						WIFI_ERR_FUNC("Turn off p2p/ap mode fail");
-					} else {
-						WIFI_INFO_FUNC("Turn off p2p/ap mode");
-						wlan_mode = WLAN_MODE_HALT;
-					}
-				}
-				dev_put(netdev);
-				netdev = NULL;
-			}
+			if (wifi_p2p_off() == 0)
+				wlan_mode = WLAN_MODE_HALT;
 
 			if (MTK_WCN_BOOL_FALSE == mtk_wcn_wmt_func_off(WMTDRV_TYPE_WIFI)) {
 				WIFI_ERR_FUNC("WMT turn off WIFI fail!\n");
@@ -378,7 +367,12 @@ ssize_t WIFI_write(struct file *filp, const char __user *buf, size_t count, loff
 			}
 		} else if (local[0] == '1') {
 			if (powered == 1) {
-				WIFI_INFO_FUNC("WIFI is already power on!\n");
+				/* already on: back to station only, dropping ap0/p2p0 */
+				if (wlan_mode != WLAN_MODE_HALT) {
+					if (wifi_p2p_off() != 0)
+						goto done;
+					wlan_mode = WLAN_MODE_HALT;
+				}
 				retval = count;
 				goto done;
 			}
