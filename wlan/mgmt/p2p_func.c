@@ -359,8 +359,6 @@ p2pFuncStartGO(IN P_ADAPTER_T prAdapter,
 	do {
 		ASSERT_BREAK((prAdapter != NULL) && (prBssInfo != NULL));
 
-		ASSERT(prBssInfo->eCurrentOPMode == OP_MODE_ACCESS_POINT);
-
 		prAdapter->rWifiVar.prP2pFsmInfo->rScanReqInfo.fgIsGOInitialDone = 1;
 		DBGLOG(P2P, INFO,
 		       "p2pFuncStartGO:NFC Done[%d]\n",

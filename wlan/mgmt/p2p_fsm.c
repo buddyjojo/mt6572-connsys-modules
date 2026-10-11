@@ -2169,6 +2169,9 @@ VOID p2pFsmRunEventConnectionAbort(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMs
 			}
 			break;
 		case OP_MODE_P2P_DEVICE:
+		case OP_MODE_NUM:
+			/* no group: wpa_supplicant flushes stations around AP start/stop */
+			break;
 		default:
 			ASSERT(FALSE);
 			break;
