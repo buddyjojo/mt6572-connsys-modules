@@ -2831,35 +2831,6 @@ notify_resume:
 
 int set_p2p_mode_handler(struct net_device *netdev, PARAM_CUSTOM_P2P_SET_STRUCT_T p2pmode)
 {
-#if !CFG_ENABLE_WIFI_DIRECT
-	/* STA-only build: nothing to disable, mode switching unsupported */
-	DBGLOG(INIT, INFO, "set_p2p_mode(%u,%u) ignored: P2P compiled out\n",
-	       (UINT_32) p2pmode.u4Enable, (UINT_32) p2pmode.u4Mode);
-	return p2pmode.u4Enable ? -EOPNOTSUPP : 0;
-#elif 0
-	P_GLUE_INFO_T prGlueInfo = *((P_GLUE_INFO_T *) netdev_priv(netdev));
-	PARAM_CUSTOM_P2P_SET_STRUCT_T rSetP2P;
-	WLAN_STATUS rWlanStatus = WLAN_STATUS_SUCCESS;
-	UINT_32 u4BufLen = 0;
-
-	rSetP2P.u4Enable = p2pmode.u4Enable;
-	rSetP2P.u4Mode = p2pmode.u4Mode;
-
-	if (!rSetP2P.u4Enable)
-		p2pNetUnregister(prGlueInfo, TRUE);
-
-	rWlanStatus = kalIoctl(prGlueInfo,
-			       wlanoidSetP2pMode,
-			       (PVOID) &rSetP2P,
-			       sizeof(PARAM_CUSTOM_P2P_SET_STRUCT_T), FALSE, FALSE, TRUE, FALSE, &u4BufLen);
-	DBGLOG(INIT, INFO, "ret = %d\n", rWlanStatus);
-	if (rSetP2P.u4Enable)
-		p2pNetRegister(prGlueInfo, TRUE);
-
-	return 0;
-
-#else
-
 	P_GLUE_INFO_T prGlueInfo = *((P_GLUE_INFO_T *) netdev_priv(netdev));
 	PARAM_CUSTOM_P2P_SET_STRUCT_T rSetP2P;
 	WLAN_STATUS rWlanStatus = WLAN_STATUS_SUCCESS;
@@ -2924,7 +2895,6 @@ int set_p2p_mode_handler(struct net_device *netdev, PARAM_CUSTOM_P2P_SET_STRUCT_
 	g_u4P2POnOffing = 0;
 	GLUE_RELEASE_THE_SPIN_LOCK(&g_p2p_lock);
 	return 0;
-#endif
 }
 
 static void set_dbg_level_handler(unsigned char dbg_lvl[DBG_MODULE_NUM])
