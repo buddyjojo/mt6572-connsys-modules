@@ -3704,7 +3704,19 @@ WLAN_STATUS nicRxProcessActionFrame(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSw
 
 	switch (prActFrame->ucCategory) {
 	case CATEGORY_PUBLIC_ACTION:
-		if (HIF_RX_HDR_GET_NETWORK_IDX(prSwRfb->prHifRxHdr) == NETWORK_TYPE_AIS_INDEX)
+		/*
+		 * The firmware tags public action frames sent to the P2P Device
+		 * address (provision discovery, GO negotiation, invitation) with
+		 * the AIS network, so route by destination instead: the station
+		 * never owns the P2P BSS address.
+		 */
+		if (HIF_RX_HDR_GET_NETWORK_IDX(prSwRfb->prHifRxHdr) == NETWORK_TYPE_AIS_INDEX
+#if CFG_ENABLE_WIFI_DIRECT
+		    && !(prAdapter->fgIsP2PRegistered &&
+			 EQUAL_MAC_ADDR(prActFrame->aucDestAddr,
+					prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX].aucOwnMacAddr))
+#endif
+		    )
 			aisFuncValidateRxActionFrame(prAdapter, prSwRfb);
 #if CFG_ENABLE_WIFI_DIRECT
 		else if (prAdapter->fgIsP2PRegistered) {
