@@ -3321,6 +3321,7 @@ static VOID wlanRemove(VOID)
 	P_WLANDEV_INFO_T prWlandevInfo = NULL;
 	P_GLUE_INFO_T prGlueInfo = NULL;
 	P_ADAPTER_T prAdapter = NULL;
+	UINT_32 u4BufLen;
 
 	DBGLOG(INIT, LOUD, "Remove wlan!\n");
 
@@ -3351,6 +3352,12 @@ static VOID wlanRemove(VOID)
 	}
 
 	kalPerMonDestroy(prGlueInfo);
+
+	/* wlan0 goes last, after the main thread stops: leave the BSS while
+	 * it still runs, or cfg80211 unregisters a connected station */
+	if (kalGetMediaStateIndicated(prGlueInfo) == PARAM_MEDIA_STATE_CONNECTED)
+		kalIoctl(prGlueInfo, wlanoidSetDisassociate, NULL, 0, FALSE, FALSE, TRUE, FALSE, &u4BufLen);
+
 #if CFG_ENABLE_WIFI_DIRECT
 	/* avoid remove & p2p off command simultaneously */
 	{
