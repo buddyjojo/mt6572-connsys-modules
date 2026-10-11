@@ -87,6 +87,7 @@ for b in launcher/mtk_stp_launcher stpbt-hci-test stpgps-probe gps-nmea; do
 	install -m 0755 "$M/tools/$b" "$SD/root/connsys/$(basename "$b")"
 done
 cp "$M/tools/wifi-up.sh" "$SD/root/connsys/wifi-up.sh"
+install -m 0755 "$M/tools/ap-up.sh" "$SD/root/connsys/ap-up.sh"
 cp "$M/tools/wifi-fw-extract.sh" "$SD/root/connsys/wifi-fw-extract.sh"
 chmod +x "$SD/root/connsys/wifi-up.sh" "$SD/root/connsys/wifi-fw-extract.sh"
 

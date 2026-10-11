@@ -313,6 +313,7 @@ How to run and build each one, and the rules they share, are in
 | `connsys-up.sh` | one-shot CONSYS bring-up + HCI smoke test |
 | `bt-up.sh` / `S99bt` | full BT stack bring-up (boot service) |
 | `wifi-up.sh` | Wi-Fi bring-up: wlan modules, func-on, waits for `wlan0` |
+| `ap-up.sh` | Wi-Fi hotspot on `ap0` next to `wlan0`, optionally sharing its uplink through NAT |
 | `fm-up.sh` | FM bring-up: driver, AFE route, `fmctl` in the foreground or (`-b`) in the background on `/tmp/fmin` |
 | `fm-record.sh` | record or stream a station from the AFE capture device |
 | `fm.md` | FM radio runbook: listening, `fmctl` commands, recording, streaming, troubleshooting |
@@ -345,55 +346,33 @@ from `iw ... interface add`:
 |---|---|
 | `echo A > /dev/wmtWifi` | `ap0` (AP) on the second wiphy |
 | `echo P > /dev/wmtWifi` | `p2p0` (Wi-Fi Direct) |
-| `echo 0 > /dev/wmtWifi` | turns Wi-Fi off, `wlan0` included, removing `ap0`/`p2p0` |
+| `echo 1 > /dev/wmtWifi` | Wi-Fi on; when it already is, removes `ap0`/`p2p0` and keeps `wlan0` |
+| `echo 0 > /dev/wmtWifi` | turns Wi-Fi off, `wlan0` included |
 
 `wlan0` stays up and associated while `ap0` runs. There is one radio, so
 the AP has to use the station's channel.
 
-Plain AP with wpa_supplicant (hostapd works too), `ap.conf`:
+`tools/ap-up.sh` runs a WPA2-PSK hotspot on `ap0`, with the SSID and
+passphrase in `/etc/ap.conf`:
 
 ```
-ctrl_interface=/var/run/wpa_supplicant_ap
-network={
-	ssid="my-ap"
-	mode=2
-	frequency=2437
-	key_mgmt=WPA-PSK
-	proto=RSN
-	pairwise=CCMP
-	group=CCMP
-	psk="change-me"
-}
+AP_SSID=my-ap
+AP_PSK=change-me
 ```
 
-Set `frequency` to `wlan0`'s if it is associated. Then:
-
 ```
-echo A > /dev/wmtWifi
-ip addr add 192.168.43.1/24 dev ap0
-wpa_supplicant -B -i ap0 -D nl80211 -c ap.conf
-dnsmasq --interface=ap0 --bind-interfaces --port=0 \
-	--dhcp-range=192.168.43.10,192.168.43.50,12h
+ap-up.sh start      # ap0 on wlan0's channel, DHCP on 192.168.43.0/24
+ap-up.sh start -n   # also share wlan0's uplink through NAT
+ap-up.sh status
+ap-up.sh stop       # removes ap0, wlan0 stays up
 ```
 
-To share `wlan0`'s uplink with the clients (needs the netfilter options
-under [Kernel prerequisites](#kernel-prerequisites)), turn on forwarding,
-masquerade the AP subnet out of `wlan0`, and run dnsmasq with DNS rather
-than `--port=0`, so the clients get `ap0` as router and resolver:
-
-```
-sysctl -w net.ipv4.ip_forward=1
-nft -f - <<'EOF'
-table ip hotspot {
-	chain postrouting {
-		type nat hook postrouting priority srcnat;
-		ip saddr 192.168.43.0/24 oifname "wlan0" masquerade
-	}
-}
-EOF
-dnsmasq --interface=ap0 --bind-interfaces --except-interface=lo \
-	--dhcp-range=192.168.43.10,192.168.43.50,12h
-```
+It runs wpa_supplicant in AP mode (`mode=2`; hostapd works too) and
+dnsmasq. Without `-n` the clients get no default route, so they keep their
+own uplink. `-n` needs the netfilter options under
+[Kernel prerequisites](#kernel-prerequisites) and nftables: it turns on
+IPv4 forwarding, masquerades the AP subnet out of `wlan0`, and has dnsmasq
+serve as router and DNS.
 
 Wi-Fi Direct with wpa_supplicant on `p2p0` (`p2p.conf`):
 

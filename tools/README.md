@@ -85,6 +85,16 @@ Then use the usual `iw` / `wpa_supplicant -D nl80211` / `udhcpc`. Leave PSM
 alone: `wlan_gen2` holds its own keep-awake reference, and forcing
 `'0 0'` into `wmt_dbg` stops BT sleeping for the rest of the session.
 
+### `ap-up.sh`
+
+Wi-Fi hotspot on `ap0`, after `wifi-up.sh`: `ap-up.sh start [-n] | stop |
+status`. It takes the SSID and passphrase from `/etc/ap.conf` (`AP_SSID=`,
+`AP_PSK=`), puts the AP on `wlan0`'s channel, and serves DHCP on
+`192.168.43.0/24`. `-n` shares `wlan0`'s uplink through an nftables
+masquerade. `stop` removes `ap0` and leaves `wlan0` up. Needs
+wpa_supplicant, dnsmasq and, for `-n`, nftables (see
+[AP / P2P](../README.md#ap--p2p)).
+
 ### `fm-up.sh`, `fm-record.sh`, `fmctl`
 
 FM radio: listen, seek, scan and read RDS with `fm-up.sh [-b] [-n] [-s] [MHz]`;
