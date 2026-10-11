@@ -21,7 +21,7 @@ out-of-tree modules in the spirit of
 | Power management (PSM / chip sleep) | working — sleeps on an idle link with BT and Wi-Fi up (see [PSM](#power-management-psm)) |
 | WiFi (`wlan/` gen2 driver → cfg80211 `wlan0`) | working — scan, WPA2-PSK association, DHCP, station stats, ~34/22 Mbit/s TCP down/up |
 | BT + WiFi together | working with Wi-Fi in CAM, the default — HID keyboard + mouse alongside Wi-Fi traffic; with 802.11 power save on, BT HID traffic makes the BT firmware assert, and a BLE mouse can still drop now and then (see [Operational notes](#operational-notes)) |
-| WiFi AP (hotspot) | working — `ap0` next to an associated `wlan0` on the same channel, WPA2-PSK through wpa_supplicant `mode=2`, ~22-24 Mbit/s TCP both ways; phones in power save see idle traffic late or lost (see [AP / P2P](#ap--p2p)) |
+| WiFi AP (hotspot) | working — `ap0` next to an associated `wlan0` on the same channel, WPA2-PSK through wpa_supplicant `mode=2`, ~22-24 Mbit/s TCP both ways, ~11/7 Mbit/s down/up to a client sharing `wlan0`'s uplink through NAT; phones in power save see idle traffic late or lost (see [AP / P2P](#ap--p2p)) |
 | WiFi P2P (Wi-Fi Direct) | working — `p2p0` next to an associated `wlan0`: discovery, provision discovery, GO negotiation, WPS PBC, as group owner or client, ~19-28 Mbit/s TCP both ways (see [AP / P2P](#ap--p2p)) |
 | FM receiver (`fmradio/` MT6627 driver → `/dev/fm`) | working — tune, scan/seek, RDS (PI, station name, radio text), audio to the headphones through the AFE's CONSYS I2S input, recording and streaming through the AFE's capture device; the headphone cable is the antenna |
 | GPS (`conn_soc/` → `/dev/stpgps`) | working — first fix in about 50 s from an empty aiding store, about 10 s warm, with the device's own stock positioning engine; holds the chip awake while open, alongside BT; `tools/gps-up.sh` serves it through gpsd (see [GPS](#gps)) |
@@ -75,6 +75,10 @@ The kernel tree the modules build against must provide:
   that exist as `.ko` and skips the rest, so either is fine (`libaes` is
   typically `CONFIG_CRYPTO_LIB_AES=y` and has no module at all);
 - `CONFIG_CFG80211` (=m works; insmod `cfg80211.ko` before `wlan_gen2.ko`);
+- for sharing the station uplink with AP clients, NAT through nftables:
+  `CONFIG_NETFILTER`, `CONFIG_NF_CONNTRACK`, `CONFIG_NF_NAT`,
+  `CONFIG_NF_TABLES`, `CONFIG_NF_TABLES_IPV4`, `CONFIG_NFT_NAT` and
+  `CONFIG_NFT_MASQ`. The AP itself works without them;
 - for FM audio, the MT6572 AFE driver's FM path: the `FM Playback Switch`
   and `FM Playback Volume` controls, which take the CONSYS I2S input
   through its ASRC and HW gain 2 onto the downlink, and for recording its
@@ -111,7 +115,10 @@ staging on every SD deploy. Bring-up on the device is `connsys-up.sh`
 followed by `wifi-up.sh`.
 
 Module vermagic must match the running kernel **exactly**; rebuild and
-redeploy all modules together after any kernel rebuild.
+redeploy all modules together after any kernel rebuild. After a kernel
+config change, `make clean` first: kbuild misses config changes for these
+external modules and relinks stale objects (with `CONFIG_NETFILTER`
+turned on, `wlan_gen2` then oopses at Wi-Fi on).
 
 Userspace tools cross-compile statically:
 
@@ -338,7 +345,7 @@ from `iw ... interface add`:
 |---|---|
 | `echo A > /dev/wmtWifi` | `ap0` (AP) on the second wiphy |
 | `echo P > /dev/wmtWifi` | `p2p0` (Wi-Fi Direct) |
-| `echo 0 > /dev/wmtWifi` | removes `ap0`/`p2p0` and turns Wi-Fi off |
+| `echo 0 > /dev/wmtWifi` | turns Wi-Fi off, `wlan0` included, removing `ap0`/`p2p0` |
 
 `wlan0` stays up and associated while `ap0` runs. There is one radio, so
 the AP has to use the station's channel.
@@ -366,6 +373,25 @@ echo A > /dev/wmtWifi
 ip addr add 192.168.43.1/24 dev ap0
 wpa_supplicant -B -i ap0 -D nl80211 -c ap.conf
 dnsmasq --interface=ap0 --bind-interfaces --port=0 \
+	--dhcp-range=192.168.43.10,192.168.43.50,12h
+```
+
+To share `wlan0`'s uplink with the clients (needs the netfilter options
+under [Kernel prerequisites](#kernel-prerequisites)), turn on forwarding,
+masquerade the AP subnet out of `wlan0`, and run dnsmasq with DNS rather
+than `--port=0`, so the clients get `ap0` as router and resolver:
+
+```
+sysctl -w net.ipv4.ip_forward=1
+nft -f - <<'EOF'
+table ip hotspot {
+	chain postrouting {
+		type nat hook postrouting priority srcnat;
+		ip saddr 192.168.43.0/24 oifname "wlan0" masquerade
+	}
+}
+EOF
+dnsmasq --interface=ap0 --bind-interfaces --except-interface=lo \
 	--dhcp-range=192.168.43.10,192.168.43.50,12h
 ```
 
@@ -403,7 +429,10 @@ Known limits:
 - Clients in 802.11 power save (phones) see idle traffic arrive up to ~1 s
   late and lose a few percent of it; bulk traffic is unaffected. The same
   phone behind a regular AP sees neither.
-- Sharing the station uplink needs NAT (netfilter) in the kernel.
+- Traffic through the shared uplink crosses the one channel twice
+  (client to `ap0`, then `wlan0` to its AP), so a client gets about half
+  the AP's direct throughput: ~11/7 Mbit/s down/up, with the CPU mostly
+  idle.
 - The firmware tags public action frames addressed to the P2P Device
   address as AIS traffic; the driver routes them to P2P by destination
   address (`nicRxProcessActionFrame`), otherwise provision discovery and
