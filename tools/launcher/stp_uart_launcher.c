@@ -3,6 +3,8 @@
 *                         C O M P I L E R   F L A G S
 *******************************************************************************
 */
+/* pthread_setname_np() is a GNU extension; glibc declares it only with this */
+#define _GNU_SOURCE
 
 /******************************************************************************
 *                    E X T E R N A L   R E F E R E N C E S
